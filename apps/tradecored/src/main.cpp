@@ -7,6 +7,7 @@
 #include "tradecore/ledger/ledger_state.hpp"
 #include "tradecore/matcher/matching_engine.hpp"
 #include "tradecore/replay/replay_driver.hpp"
+#include "tradecore/risk/liquidation_engine.hpp"
 #include "tradecore/risk/risk_engine.hpp"
 #include "tradecore/snapshot/snapshot_store.hpp"
 #include "tradecore/telemetry/telemetry_sink.hpp"
@@ -22,10 +23,17 @@ int main() {
   matcher.add_market(1);
 
   risk::RiskEngine risk;
-  risk.bootstrap();
+  risk.configure_market(1, {.contract_size = 1, .initial_margin_basis_points = 500, .maintenance_margin_basis_points = 300});
+  risk.set_mark_price(1, 1000);
+  risk.credit_collateral(1, 1'000'000);
 
   funding::FundingEngine funding;
-  funding.configure(25);
+  funding.configure_market(1, {.clamp_basis_points = 50, .max_rate_basis_points = 100});
+  (void)funding.update_market(1, 1'000, 1'005, 1);
+
+  risk::LiquidationManager liquidation{risk};
+  auto liq_result = liquidation.evaluate(1);
+  (void)liq_result;
 
   ledger::LedgerState ledger;
   ledger.credit(1, 1'000'000);

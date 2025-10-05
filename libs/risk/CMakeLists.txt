@@ -1,5 +1,6 @@
 add_library(tradecore_risk STATIC
   src/risk_engine.cpp
+  src/liquidation_engine.cpp
 )
 
 target_include_directories(tradecore_risk

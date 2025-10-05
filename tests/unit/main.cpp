@@ -12,6 +12,7 @@
 #include "tradecore/ledger/ledger_state.hpp"
 #include "tradecore/matcher/matching_engine.hpp"
 #include "tradecore/replay/replay_driver.hpp"
+#include "tradecore/risk/liquidation_engine.hpp"
 #include "tradecore/risk/risk_engine.hpp"
 #include "tradecore/snapshot/snapshot_store.hpp"
 #include "tradecore/telemetry/telemetry_sink.hpp"
@@ -32,10 +33,41 @@ int main() {
   assert(account.collateral_locked == 10);
 
   risk::RiskEngine risk;
-  risk.bootstrap();
-  const auto risk_result = risk.evaluate_order({1, 1, 1}, 42);
-  assert(risk_result.decision == risk::Decision::kAccepted);
-  assert(risk_result.margin_requirement == 42);
+  risk.configure_market(1, {.contract_size = 1, .initial_margin_basis_points = 500, .maintenance_margin_basis_points = 300});
+  risk.set_mark_price(1, 1'000);
+  risk.credit_collateral(1'001, 30'000);
+
+  risk::OrderIntent open_intent{
+      .account = 1'001,
+      .market = 1,
+      .side = common::Side::kBuy,
+      .quantity = 400,
+      .limit_price = 1'000,
+      .reduce_only = false,
+  };
+  auto open_eval = risk.evaluate_order(open_intent);
+  assert(open_eval.decision == risk::Decision::kAccepted);
+
+  risk.apply_fill({.account = 1'001, .market = 1, .side = common::Side::kBuy, .quantity = 400, .price = 1'000});
+
+  risk.set_mark_price(1, 960);
+  risk::LiquidationManager liquidation{risk};
+  auto partial_liq = liquidation.evaluate(1'001);
+  assert(partial_liq.status == risk::LiquidationManager::Status::kNeedsPartial);
+
+  auto reduce_eval = risk.evaluate_order({
+      .account = 1'001,
+      .market = 1,
+      .side = common::Side::kBuy,
+      .quantity = 10,
+      .limit_price = 950,
+      .reduce_only = true,
+  });
+  assert(reduce_eval.decision == risk::Decision::kRejectedReduceOnly);
+
+  risk.set_mark_price(1, 900);
+  auto full_liq = liquidation.evaluate(1'001);
+  assert(full_liq.status == risk::LiquidationManager::Status::kNeedsFull);
 
   telemetry::TelemetrySink telemetry;
   telemetry.push({.id = 1, .value = 99});
@@ -50,9 +82,11 @@ int main() {
   assert(ingress.enqueue(frame));
 
   funding::FundingEngine funding;
-  funding.configure(25);
-  const auto snapshot = funding.compute_snapshot(1);
-  assert(snapshot.premium_rate == 25);
+  funding.configure_market(1, {.clamp_basis_points = 50, .max_rate_basis_points = 100});
+  const auto funding_snapshot = funding.update_market(1, 1'000, 1'020, 1);
+  assert(funding_snapshot.mark_price == 1'005);
+  assert(funding_snapshot.premium_rate == 50);
+  assert(funding.accumulated_funding(1) == 50);
 
   matcher::MatchingEngine matcher;
   matcher.add_market(1);

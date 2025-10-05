@@ -84,15 +84,26 @@ bool MatchingEngine::crosses(common::Side side, std::int64_t taker_price, std::i
 }
 
 std::int64_t MatchingEngine::fillable_quantity(const MarketShard& shard, const OrderRequest& req) const {
-  const auto& book = (req.side == common::Side::kBuy) ? shard.asks : shard.bids;
   std::int64_t total{0};
-  for (const auto& [price, level] : book) {
-    if (!crosses(req.side, req.price, price)) {
-      break;
+  if (req.side == common::Side::kBuy) {
+    for (const auto& [price, level] : shard.asks) {
+      if (!crosses(req.side, req.price, price)) {
+        break;
+      }
+      total += level.total_qty;
+      if (total >= req.quantity) {
+        return total;
+      }
     }
-    total += level.total_qty;
-    if (total >= req.quantity) {
-      return total;
+  } else {
+    for (const auto& [price, level] : shard.bids) {
+      if (!crosses(req.side, req.price, price)) {
+        break;
+      }
+      total += level.total_qty;
+      if (total >= req.quantity) {
+        return total;
+      }
     }
   }
   return total;
@@ -164,12 +175,21 @@ OrderResult MatchingEngine::place_order(MarketShard& shard, OrderRequest order) 
   const auto encoded = encode_order_id(order.id);
 
   if (common::HasFlag(order.flags, common::OrderFlags::kPostOnly)) {
-    const auto& book = (order.side == common::Side::kBuy) ? shard.asks : shard.bids;
-    if (!book.empty()) {
-      const auto& [best_price, _] = *book.begin();
-      if (crosses(order.side, order.price, best_price)) {
-        result.reject_code = kRejectPostOnlyWouldCross;
-        return result;
+    if (order.side == common::Side::kBuy) {
+      if (!shard.asks.empty()) {
+        const auto& [best_price, _] = *shard.asks.begin();
+        if (crosses(order.side, order.price, best_price)) {
+          result.reject_code = kRejectPostOnlyWouldCross;
+          return result;
+        }
+      }
+    } else {
+      if (!shard.bids.empty()) {
+        const auto& [best_price, _] = *shard.bids.begin();
+        if (crosses(order.side, order.price, best_price)) {
+          result.reject_code = kRejectPostOnlyWouldCross;
+          return result;
+        }
       }
     }
   }
@@ -213,59 +233,75 @@ OrderResult MatchingEngine::place_order(MarketShard& shard, OrderRequest order) 
 }
 
 void MatchingEngine::match_order(MarketShard& shard, OrderRecord& taker_record, std::vector<FillEvent>& fills) {
-  auto& book = (taker_record.request.side == common::Side::kBuy) ? shard.asks : shard.bids;
-  auto it = book.begin();
+  auto consume_book = [&](auto& book) {
+    auto it = book.begin();
+    while (taker_record.remaining > 0 && it != book.end()) {
+      const auto maker_price = it->first;
+      if (!crosses(taker_record.request.side, taker_record.request.price, maker_price)) {
+        break;
+      }
 
-  while (taker_record.remaining > 0 && it != book.end()) {
-    const auto maker_price = it->first;
-    if (!crosses(taker_record.request.side, taker_record.request.price, maker_price)) {
-      break;
-    }
+      auto& level = it->second;
+      auto* maker = level.head;
+      while (maker && taker_record.remaining > 0) {
+        const auto traded = std::min(taker_record.remaining, maker->remaining);
+        taker_record.remaining -= traded;
+        maker->remaining -= traded;
+        level.total_qty -= traded;
 
-    auto& level = it->second;
-    auto* maker = level.head;
-    while (maker && taker_record.remaining > 0) {
-      const auto traded = std::min(taker_record.remaining, maker->remaining);
-      taker_record.remaining -= traded;
-      maker->remaining -= traded;
-      level.total_qty -= traded;
+        fills.push_back(FillEvent{
+            .maker_order = maker->request.id,
+            .taker_order = taker_record.request.id,
+            .quantity = traded,
+            .price = maker_price,
+        });
 
-      fills.push_back(FillEvent{
-          .maker_order = maker->request.id,
-          .taker_order = taker_record.request.id,
-          .quantity = traded,
-          .price = maker_price,
-      });
+        if (maker->remaining == 0) {
+          auto encoded = encode_order_id(maker->request.id);
+          auto old = maker;
+          maker = maker->next;
+          level.remove(old);
+          shard.book_orders.erase(encoded);
+        } else {
+          maker = maker->next;
+        }
+      }
 
-      if (maker->remaining == 0) {
-        auto encoded = encode_order_id(maker->request.id);
-        auto old = maker;
-        maker = maker->next;
-        level.remove(old);
-        shard.book_orders.erase(encoded);
+      if (level.empty()) {
+        it = book.erase(it);
       } else {
-        maker = maker->next;
+        ++it;
       }
     }
+  };
 
-    if (level.empty()) {
-      it = book.erase(it);
-    } else {
-      ++it;
-    }
+  if (taker_record.request.side == common::Side::kBuy) {
+    consume_book(shard.asks);
+  } else {
+    consume_book(shard.bids);
   }
 }
 
 void MatchingEngine::rest_order(MarketShard& shard, OrderRecord& record) {
-  auto& book = (record.request.side == common::Side::kBuy) ? shard.bids : shard.asks;
-  auto [level_it, inserted] = book.try_emplace(record.request.price);
-  auto& level = level_it->second;
-  if (inserted) {
-    level.head = nullptr;
-    level.tail = nullptr;
-    level.total_qty = 0;
+  if (record.request.side == common::Side::kBuy) {
+    auto [level_it, inserted] = shard.bids.try_emplace(record.request.price);
+    auto& level = level_it->second;
+    if (inserted) {
+      level.head = nullptr;
+      level.tail = nullptr;
+      level.total_qty = 0;
+    }
+    level.push_back(&record);
+  } else {
+    auto [level_it, inserted] = shard.asks.try_emplace(record.request.price);
+    auto& level = level_it->second;
+    if (inserted) {
+      level.head = nullptr;
+      level.tail = nullptr;
+      level.total_qty = 0;
+    }
+    level.push_back(&record);
   }
-  level.push_back(&record);
 }
 
 void MatchingEngine::remove_order_from_book(MarketShard& shard, OrderRecord& record) {
@@ -273,16 +309,26 @@ void MatchingEngine::remove_order_from_book(MarketShard& shard, OrderRecord& rec
     return;
   }
 
-  auto& book = (record.request.side == common::Side::kBuy) ? shard.bids : shard.asks;
-  auto it = book.find(record.request.price);
-  if (it == book.end()) {
-    return;
-  }
-
-  auto& level = it->second;
-  level.remove(&record);
-  if (level.empty()) {
-    book.erase(it);
+  if (record.request.side == common::Side::kBuy) {
+    auto it = shard.bids.find(record.request.price);
+    if (it == shard.bids.end()) {
+      return;
+    }
+    auto& level = it->second;
+    level.remove(&record);
+    if (level.empty()) {
+      shard.bids.erase(it);
+    }
+  } else {
+    auto it = shard.asks.find(record.request.price);
+    if (it == shard.asks.end()) {
+      return;
+    }
+    auto& level = it->second;
+    level.remove(&record);
+    if (level.empty()) {
+      shard.asks.erase(it);
+    }
   }
 }
 

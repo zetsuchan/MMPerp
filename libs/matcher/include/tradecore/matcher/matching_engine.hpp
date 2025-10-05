@@ -65,7 +65,9 @@ struct ReplaceResult {
 class MatchingEngine {
  public:
   struct Config {
-    std::size_t arena_bytes{1 << 20};
+    std::size_t arena_bytes;
+
+    explicit Config(std::size_t bytes = (1u << 20)) noexcept : arena_bytes(bytes) {}
   };
 
   explicit MatchingEngine(const Config& config = Config{});
@@ -82,9 +84,12 @@ class MatchingEngine {
   struct PriceLevel;
 
   struct MarketShard {
+    using BidBook = std::pmr::map<std::int64_t, PriceLevel, std::greater<>>;
+    using AskBook = std::pmr::map<std::int64_t, PriceLevel, std::less<>>;
+
     std::pmr::unordered_map<std::uint64_t, OrderRecord> book_orders;
-    std::pmr::map<std::int64_t, PriceLevel, std::greater<>> bids;
-    std::pmr::map<std::int64_t, PriceLevel, std::less<>> asks;
+    BidBook bids;
+    AskBook asks;
     std::uint64_t next_sequence{1};
 
     explicit MarketShard(std::pmr::memory_resource* mem);

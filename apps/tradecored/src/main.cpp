@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 
 #include "tradecore/api/api_router.hpp"
@@ -18,7 +19,7 @@ int main() {
   ingress.configure("quic://127.0.0.1:9000");
 
   matcher::MatchingEngine matcher;
-  matcher.initialize(1);
+  matcher.add_market(1);
 
   risk::RiskEngine risk;
   risk.bootstrap();
@@ -29,14 +30,15 @@ int main() {
   ledger::LedgerState ledger;
   ledger.credit(1, 1'000'000);
 
-  wal::WalWriter wal;
-  wal.open("/tmp/tradecore.wal");
+  const auto wal_path = std::filesystem::path{"/tmp/tradecore.wal"};
+  wal::Writer wal{wal_path};
 
-  snapshot::SnapshotStore snapshot;
-  snapshot.prepare("/tmp/tradecore.snapshot");
+  const auto snapshot_dir = std::filesystem::path{"/tmp/tradecore.snapshot"};
+  snapshot::Store snapshot{snapshot_dir};
 
-  replay::ReplayDriver replay;
-  replay.load(0, 0);
+  replay::Driver replay;
+  replay.configure(snapshot.directory(), wal_path);
+  replay.set_event_handler([](const wal::Record&) {});
 
   telemetry::TelemetrySink telemetry;
   telemetry.push({.id = 1, .value = 42});

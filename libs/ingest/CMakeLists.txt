@@ -1,5 +1,6 @@
 add_library(tradecore_ingest STATIC
   src/ingress_pipeline.cpp
+  src/quic_transport.cpp
 )
 
 target_include_directories(tradecore_ingest

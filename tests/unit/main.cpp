@@ -9,6 +9,7 @@
 #include "tradecore/api/api_router.hpp"
 #include "tradecore/funding/funding_engine.hpp"
 #include "tradecore/ingest/ingress_pipeline.hpp"
+#include "tradecore/ingest/sbe_messages.hpp"
 #include "tradecore/ledger/ledger_state.hpp"
 #include "tradecore/matcher/matching_engine.hpp"
 #include "tradecore/replay/replay_driver.hpp"
@@ -75,11 +76,57 @@ int main() {
   assert(samples.size() == 1);
   assert(samples.front().value == 99);
 
-  ingest::IngressPipeline ingress;
-  ingress.configure("quic://0.0.0.0:9000");
-  std::byte payload[]{std::byte{0x01}};
-  ingest::FrameView frame{.payload = std::span<const std::byte>(payload), .received_time_ns = 0};
-  assert(ingress.enqueue(frame));
+  ingest::IngressPipeline pipeline;
+  ingest::IngressPipeline::Config ingress_cfg;
+  ingress_cfg.max_new_orders_per_second = 2;
+  pipeline.configure(ingress_cfg);
+
+  ingest::sbe::NewOrder sbe_new{
+      .side = common::Side::kBuy,
+      .quantity = 5,
+      .price = 1'000,
+      .flags = 0,
+  };
+  auto payload_new = ingest::sbe::encode(sbe_new);
+  ingest::Frame new_frame{
+      .header = {.account = 9, .nonce = 1, .received_time_ns = 0, .priority = 0, .kind = ingest::MessageKind::kNewOrder},
+      .payload = std::span<const std::byte>(payload_new.data(), payload_new.size()),
+  };
+  assert(pipeline.submit(new_frame));
+
+  ingest::OwnedFrame dequeued;
+  assert(pipeline.next_new_order(dequeued));
+  const auto decoded_new = ingest::sbe::decode_new_order(dequeued.payload);
+  assert(decoded_new.quantity == sbe_new.quantity);
+
+  ingest::sbe::Cancel sbe_cancel{.order_id = 42};
+  auto payload_cancel = ingest::sbe::encode(sbe_cancel);
+  ingest::Frame cancel_frame{
+      .header = {.account = 9, .nonce = 2, .received_time_ns = 0, .priority = 0, .kind = ingest::MessageKind::kCancel},
+      .payload = std::span<const std::byte>(payload_cancel.data(), payload_cancel.size()),
+  };
+  assert(pipeline.submit(cancel_frame));
+  ingest::OwnedFrame dequeued_cancel;
+  assert(pipeline.next_cancel(dequeued_cancel));
+  const auto decoded_cancel = ingest::sbe::decode_cancel(dequeued_cancel.payload);
+  assert(decoded_cancel.order_id == 42);
+
+  ingest::Frame heartbeat{
+      .header = {.account = 9, .nonce = 3, .received_time_ns = 0, .priority = 0, .kind = ingest::MessageKind::kHeartbeat},
+      .payload = std::span<const std::byte>(),
+  };
+  assert(pipeline.submit(heartbeat));
+  assert(pipeline.stats().dropped_heartbeats == 1);
+
+  // rate limit: third new order in same window rejected
+  assert(pipeline.submit(new_frame));
+  auto second_payload = ingest::sbe::encode(sbe_new);
+  ingest::Frame rate_frame{
+      .header = {.account = 9, .nonce = 4, .received_time_ns = 0, .priority = 0, .kind = ingest::MessageKind::kNewOrder},
+      .payload = std::span<const std::byte>(second_payload.data(), second_payload.size()),
+  };
+  assert(!pipeline.submit(rate_frame));
+  assert(pipeline.stats().rejected_rate_limit == 1);
 
   funding::FundingEngine funding;
   funding.configure_market(1, {.clamp_basis_points = 50, .max_rate_basis_points = 100});

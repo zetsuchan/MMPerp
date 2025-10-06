@@ -4,6 +4,7 @@
 #include "tradecore/api/api_router.hpp"
 #include "tradecore/funding/funding_engine.hpp"
 #include "tradecore/ingest/ingress_pipeline.hpp"
+#include "tradecore/ingest/quic_transport.hpp"
 #include "tradecore/ledger/ledger_state.hpp"
 #include "tradecore/matcher/matching_engine.hpp"
 #include "tradecore/replay/replay_driver.hpp"
@@ -17,7 +18,14 @@ int main() {
   using namespace tradecore;
 
   ingest::IngressPipeline ingress;
-  ingress.configure("quic://127.0.0.1:9000");
+  ingest::IngressPipeline::Config ingress_cfg;
+  ingress_cfg.max_new_orders_per_second = 100'000;
+  ingress.configure(ingress_cfg);
+
+  ingest::QuicTransport transport;
+  transport.start("quic://127.0.0.1:9000", [&](const ingest::Frame& frame) {
+    ingress.submit(frame);
+  });
 
   matcher::MatchingEngine matcher;
   matcher.add_market(1);
@@ -55,5 +63,6 @@ int main() {
   api.register_endpoint("/orders");
 
   std::cout << "tradecored skeleton bootstrapped" << std::endl;
+  transport.stop();
   return 0;
 }

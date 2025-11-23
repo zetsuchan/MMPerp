@@ -69,6 +69,10 @@ class RiskEngine {
   [[nodiscard]] RiskResult evaluate_order(const OrderIntent& intent) const;
   [[nodiscard]] MarginSummary account_summary(common::AccountId account) const;
 
+  [[nodiscard]] std::vector<common::AccountId> get_all_accounts() const;
+  [[nodiscard]] const AccountState* find_account(common::AccountId account) const;
+  [[nodiscard]] const MarketState* find_market(common::MarketId market) const;
+
  private:
   struct PositionState {
     std::int64_t quantity{0};

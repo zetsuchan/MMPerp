@@ -77,5 +77,12 @@ std::int64_t FundingEngine::clamp(std::int64_t value, std::int64_t min_value, st
   return std::min(std::max(value, min_value), max_value);
 }
 
+void FundingEngine::reset_accumulated_funding(common::MarketId market) {
+  auto it = markets_.find(market);
+  if (it != markets_.end()) {
+    it->second.funding_accumulator = 0;
+  }
+}
+
 }  // namespace funding
 }  // namespace tradecore

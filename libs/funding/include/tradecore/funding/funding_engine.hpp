@@ -33,6 +33,7 @@ class FundingEngine {
 
   [[nodiscard]] std::int64_t mark_price(common::MarketId market) const;
   [[nodiscard]] std::int64_t accumulated_funding(common::MarketId market) const;
+  void reset_accumulated_funding(common::MarketId market);
 
  private:
   struct MarketState {

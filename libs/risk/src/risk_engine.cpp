@@ -236,5 +236,14 @@ std::int64_t RiskEngine::apply_basis_points(std::int64_t notional, std::int32_t 
   return (notional * basis_points + (kBasisPointDenominator - 1)) / kBasisPointDenominator;
 }
 
+std::vector<common::AccountId> RiskEngine::get_all_accounts() const {
+  std::vector<common::AccountId> accounts;
+  accounts.reserve(accounts_.size());
+  for (const auto& [account_id, _] : accounts_) {
+    accounts.push_back(account_id);
+  }
+  return accounts;
+}
+
 }  // namespace risk
 }  // namespace tradecore

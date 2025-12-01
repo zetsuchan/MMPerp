@@ -1,0 +1,63 @@
+# TradeCore Engine Configuration
+# Copy to tradecore.toml and customize for your environment
+
+[transport]
+# QUIC endpoint for order ingestion
+endpoint = "quic://127.0.0.1:9000"
+
+[ingress]
+# Queue depths (power of 2 recommended)
+new_order_queue_depth = 4096
+cancel_queue_depth = 4096
+replace_queue_depth = 4096
+
+# Rate limits per account per second
+max_new_orders_per_second = 100000
+max_cancels_per_second = 200000
+
+[matcher]
+# Memory arena for order book structures
+arena_bytes = 1048576  # 1MB per market
+
+[persistence]
+# Write-ahead log for durability
+wal_path = "/var/lib/tradecore/events.wal"
+wal_flush_threshold = 128  # Flush after N records
+
+# Snapshot directory for state checkpoints
+snapshot_dir = "/var/lib/tradecore/snapshots"
+
+[telemetry]
+enabled = true
+buffer_size = 1024
+
+# Market configurations
+# Add one [[markets]] section per perpetual contract
+
+[[markets]]
+id = 1
+symbol = "BTC-PERP"
+
+[markets.risk]
+contract_size = 1              # Notional per contract in quote units
+initial_margin_bp = 500        # 5% initial margin
+maintenance_margin_bp = 300    # 3% maintenance margin
+initial_mark_price = 100000    # Initial mark price ($100,000)
+
+[markets.funding]
+clamp_bp = 50    # 0.5% premium clamp
+max_rate_bp = 100  # 1% max funding rate
+
+[[markets]]
+id = 2
+symbol = "ETH-PERP"
+
+[markets.risk]
+contract_size = 1
+initial_margin_bp = 500
+maintenance_margin_bp = 300
+initial_mark_price = 3500
+
+[markets.funding]
+clamp_bp = 50
+max_rate_bp = 100

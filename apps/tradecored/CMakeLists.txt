@@ -6,6 +6,7 @@ target_compile_features(tradecored PUBLIC cxx_std_20)
 
 target_link_libraries(tradecored
   PRIVATE
+    tradecore::config
     tradecore::ingest
     tradecore::matcher
     tradecore::risk

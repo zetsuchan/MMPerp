@@ -12,6 +12,7 @@ constexpr std::uint16_t kRejectPostOnlyWouldCross = 1003;
 constexpr std::uint16_t kRejectOrderNotFound = 1004;
 constexpr std::uint16_t kRejectInvalidQuantity = 1005;
 constexpr std::uint16_t kRejectDuplicateOrderId = 1006;
+constexpr std::uint16_t kRejectInvalidDisplayQuantity = 1007;
 }  // namespace
 
 MatchingEngine::MarketShard::MarketShard(std::pmr::memory_resource* mem)
@@ -32,10 +33,12 @@ void MatchingEngine::PriceLevel::push_back(OrderRecord* record) {
   tail = record;
   record->level = this;
   total_qty += record->remaining;
+  visible_qty += record->display_remaining;
 }
 
 void MatchingEngine::PriceLevel::remove(OrderRecord* record) {
   total_qty -= record->remaining;
+  visible_qty -= record->display_remaining;
   if (record->prev) {
     record->prev->next = record->next;
   } else {
@@ -49,6 +52,20 @@ void MatchingEngine::PriceLevel::remove(OrderRecord* record) {
   record->prev = nullptr;
   record->next = nullptr;
   record->level = nullptr;
+}
+
+void MatchingEngine::PriceLevel::update_after_fill(OrderRecord* record, std::int64_t filled_qty) {
+  // Update total quantity
+  total_qty -= filled_qty;
+
+  // Calculate old display and refresh
+  const auto old_display = record->display_remaining;
+  record->refresh_display();
+  const auto new_display = record->display_remaining;
+
+  // Update visible quantity delta
+  visible_qty -= old_display;
+  visible_qty += new_display;
 }
 
 MatchingEngine::MatchingEngine(const Config& config)
@@ -114,6 +131,13 @@ OrderResult MatchingEngine::submit(const OrderRequest& request) {
     return OrderResult{.reject_code = kRejectInvalidQuantity};
   }
 
+  // Validate iceberg display quantity
+  if (common::HasFlag(request.flags, common::OrderFlags::kIceberg)) {
+    if (request.display_quantity <= 0 || request.display_quantity > request.quantity) {
+      return OrderResult{.reject_code = kRejectInvalidDisplayQuantity};
+    }
+  }
+
   auto& shard = ensure_market(request.id.market);
   return place_order(shard, request);
 }
@@ -157,6 +181,7 @@ ReplaceResult MatchingEngine::replace(const ReplaceRequest& request) {
   OrderRequest new_req = record_copy.request;
   new_req.price = request.new_price;
   new_req.quantity = request.new_quantity;
+  new_req.display_quantity = request.new_display_quantity;
   new_req.tif = request.new_tif;
   new_req.flags = request.new_flags;
   new_req.id = request.id;
@@ -207,6 +232,18 @@ OrderResult MatchingEngine::place_order(MarketShard& shard, OrderRequest order) 
   taker_record.remaining = order.quantity;
   taker_record.fifo_seq = shard.next_sequence++;
 
+  // Initialize display fields based on order type
+  if (common::HasFlag(order.flags, common::OrderFlags::kHidden)) {
+    taker_record.display_size = 0;
+    taker_record.display_remaining = 0;
+  } else if (common::HasFlag(order.flags, common::OrderFlags::kIceberg)) {
+    taker_record.display_size = order.display_quantity;
+    taker_record.display_remaining = std::min(order.display_quantity, order.quantity);
+  } else {
+    taker_record.display_size = order.quantity;
+    taker_record.display_remaining = order.quantity;
+  }
+
   match_order(shard, taker_record, result.fills);
 
   if (taker_record.remaining > 0) {
@@ -216,6 +253,9 @@ OrderResult MatchingEngine::place_order(MarketShard& shard, OrderRequest order) 
       result.resting = false;
       return result;
     }
+
+    // Refresh display for resting order
+    taker_record.refresh_display();
 
     auto [it, inserted] = shard.book_orders.emplace(encoded, std::move(taker_record));
     if (!inserted) {
@@ -247,7 +287,9 @@ void MatchingEngine::match_order(MarketShard& shard, OrderRecord& taker_record, 
         const auto traded = std::min(taker_record.remaining, maker->remaining);
         taker_record.remaining -= traded;
         maker->remaining -= traded;
-        level.total_qty -= traded;
+
+        // Update level quantities including visible qty for iceberg/hidden
+        level.update_after_fill(maker, traded);
 
         fills.push_back(FillEvent{
             .maker_order = maker->request.id,
@@ -290,6 +332,7 @@ void MatchingEngine::rest_order(MarketShard& shard, OrderRecord& record) {
       level.head = nullptr;
       level.tail = nullptr;
       level.total_qty = 0;
+      level.visible_qty = 0;
     }
     level.push_back(&record);
   } else {
@@ -299,6 +342,7 @@ void MatchingEngine::rest_order(MarketShard& shard, OrderRecord& record) {
       level.head = nullptr;
       level.tail = nullptr;
       level.total_qty = 0;
+      level.visible_qty = 0;
     }
     level.push_back(&record);
   }

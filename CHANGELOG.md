@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 - Added SPSC-backed ingress pipeline with per-lane queues (new/cancel/replace), auth hook, and per-account rate limiting stubs.
 - Introduced SBE-style message helpers and QUIC transport stub wiring; tradecored now wires the transport into the pipeline.
 - Added reusable `tradecore::common::SpscRing` utility and expanded unit tests to exercise message encoding, queue classification, and rate limiting.
+- Enhanced telemetry sink with counter/latency helpers and drained summaries; unit tests cover latency quantiles.
+- Created `issues.md` to track follow-up work (telemetry scaling, real QUIC/auth, matcher O(1) cancel, etc.).
 
 ## [2025-10-05] Risk, funding, liquidation pass (`7b6c620`)
 - Implemented cross-margin risk engine with collateral accounting, reduce-only enforcement, and deterministic margin summaries.

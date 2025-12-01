@@ -26,6 +26,7 @@ struct OrderRequest {
   common::Side side{common::Side::kBuy};
   std::int64_t quantity{0};
   std::int64_t price{0};
+  std::int64_t display_quantity{0};  // For iceberg orders: visible size (0 = show full quantity)
   common::TimeInForce tif{common::TimeInForce::kGtc};
   std::uint16_t flags{common::kFlagsNone};
 };
@@ -38,6 +39,7 @@ struct ReplaceRequest {
   common::OrderId id{};
   std::int64_t new_quantity{0};
   std::int64_t new_price{0};
+  std::int64_t new_display_quantity{0};  // For iceberg orders
   common::TimeInForce new_tif{common::TimeInForce::kGtc};
   std::uint16_t new_flags{common::kFlagsNone};
 };
@@ -97,20 +99,45 @@ class MatchingEngine {
 
   struct OrderRecord {
     OrderRequest request;
-    std::int64_t remaining{0};
+    std::int64_t remaining{0};         // Total remaining quantity (actual)
+    std::int64_t display_remaining{0}; // Currently visible quantity (for iceberg/hidden)
+    std::int64_t display_size{0};      // Original display size for iceberg refresh
     PriceLevel* level{nullptr};
     OrderRecord* prev{nullptr};
     OrderRecord* next{nullptr};
     std::uint64_t fifo_seq{0};
+
+    // Returns true if this order is hidden (not visible on book)
+    [[nodiscard]] bool is_hidden() const noexcept {
+      return common::HasFlag(request.flags, common::OrderFlags::kHidden);
+    }
+
+    // Returns true if this is an iceberg order
+    [[nodiscard]] bool is_iceberg() const noexcept {
+      return common::HasFlag(request.flags, common::OrderFlags::kIceberg);
+    }
+
+    // Refresh display quantity after fill (for iceberg orders)
+    void refresh_display() noexcept {
+      if (is_hidden()) {
+        display_remaining = 0;
+      } else if (is_iceberg() && display_size > 0) {
+        display_remaining = std::min(display_size, remaining);
+      } else {
+        display_remaining = remaining;
+      }
+    }
   };
 
   struct PriceLevel {
     OrderRecord* head{nullptr};
     OrderRecord* tail{nullptr};
-    std::int64_t total_qty{0};
+    std::int64_t total_qty{0};    // Total actual quantity (for matching)
+    std::int64_t visible_qty{0};  // Visible quantity (for market data feed)
 
     void push_back(OrderRecord* record);
     void remove(OrderRecord* record);
+    void update_after_fill(OrderRecord* record, std::int64_t filled_qty);
     bool empty() const noexcept { return head == nullptr; }
   };
 

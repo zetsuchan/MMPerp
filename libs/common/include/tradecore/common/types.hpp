@@ -30,6 +30,8 @@ enum OrderFlags : std::uint16_t {
   kFlagsNone = 0,
   kPostOnly = 1 << 0,
   kReduceOnly = 1 << 1,
+  kHidden = 1 << 2,    // Fully hidden order - not visible on book, still matches
+  kIceberg = 1 << 3,   // Iceberg order - shows display_quantity, hides rest
 };
 
 inline constexpr bool HasFlag(std::uint16_t flags, OrderFlags flag) noexcept {

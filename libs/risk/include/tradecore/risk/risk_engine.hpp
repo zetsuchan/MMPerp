@@ -57,23 +57,6 @@ struct MarginSummary {
 
 class RiskEngine {
  public:
-  explicit RiskEngine(std::size_t arena_bytes = 1 << 20);
-
-  void configure_market(common::MarketId market, MarketRiskConfig config);
-  void set_mark_price(common::MarketId market, std::int64_t mark_price);
-
-  void credit_collateral(common::AccountId account, std::int64_t amount);
-  void debit_collateral(common::AccountId account, std::int64_t amount);
-
-  void apply_fill(const FillContext& fill);
-  [[nodiscard]] RiskResult evaluate_order(const OrderIntent& intent) const;
-  [[nodiscard]] MarginSummary account_summary(common::AccountId account) const;
-
-  [[nodiscard]] std::vector<common::AccountId> get_all_accounts() const;
-  [[nodiscard]] const AccountState* find_account(common::AccountId account) const;
-  [[nodiscard]] const MarketState* find_market(common::MarketId market) const;
-
- private:
   struct PositionState {
     std::int64_t quantity{0};
     std::int64_t entry_price{0};
@@ -93,14 +76,30 @@ class RiskEngine {
     std::int64_t mark_price{0};
   };
 
+  explicit RiskEngine(std::size_t arena_bytes = 1 << 20);
+
+  void configure_market(common::MarketId market, MarketRiskConfig config);
+  void set_mark_price(common::MarketId market, std::int64_t mark_price);
+
+  void credit_collateral(common::AccountId account, std::int64_t amount);
+  void debit_collateral(common::AccountId account, std::int64_t amount);
+
+  void apply_fill(const FillContext& fill);
+  [[nodiscard]] RiskResult evaluate_order(const OrderIntent& intent) const;
+  [[nodiscard]] MarginSummary account_summary(common::AccountId account) const;
+
+  // Public accessors for external components (liquidation, funding, API)
+  [[nodiscard]] std::vector<common::AccountId> get_all_accounts() const;
+  [[nodiscard]] const AccountState* find_account(common::AccountId account) const;
+  [[nodiscard]] const MarketState* find_market(common::MarketId market) const;
+
+ private:
   mutable std::pmr::monotonic_buffer_resource arena_;
   std::pmr::unordered_map<common::AccountId, AccountState> accounts_;
   std::pmr::unordered_map<common::MarketId, MarketState> markets_;
 
   AccountState& ensure_account(common::AccountId account);
-  const AccountState* find_account(common::AccountId account) const;
   MarketState& ensure_market(common::MarketId market);
-  const MarketState* find_market(common::MarketId market) const;
 
   [[nodiscard]] MarginSummary account_summary_with_delta(common::AccountId account,
                                                          std::optional<FillContext> delta) const;

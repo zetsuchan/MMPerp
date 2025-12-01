@@ -63,19 +63,30 @@ void LiquidationExecutor::execute_liquidation(const LiquidationOrder& order) {
 
   if (result.accepted && !result.fills.empty()) {
     for (const auto& fill : result.fills) {
-      const bool is_maker = (fill.maker_order == liquidation_order_id);
-      const auto fill_side = is_maker ? order.side : 
-                             (order.side == common::Side::kBuy ? common::Side::kSell : common::Side::kBuy);
+      const bool liq_is_maker = (fill.maker_order == liquidation_order_id);
       
-      risk::FillContext fill_context{
+      risk::FillContext liq_fill{
           .account = order.account,
           .market = order.market,
-          .side = fill_side,
+          .side = order.side,
           .quantity = fill.quantity,
           .price = fill.price
       };
+      risk_engine_.apply_fill(liq_fill);
       
-      risk_engine_.apply_fill(fill_context);
+      const common::AccountId counterparty_account = 
+          liq_is_maker ? fill.taker_order.session : fill.maker_order.session;
+      const common::Side counterparty_side = 
+          (order.side == common::Side::kBuy) ? common::Side::kSell : common::Side::kBuy;
+      
+      risk::FillContext counterparty_fill{
+          .account = counterparty_account,
+          .market = order.market,
+          .side = counterparty_side,
+          .quantity = fill.quantity,
+          .price = fill.price
+      };
+      risk_engine_.apply_fill(counterparty_fill);
     }
   }
 }

@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "tradecore/api/api_router.hpp"
+#include "tradecore/auth/authenticator.hpp"
 #include "tradecore/config/config_loader.hpp"
 #include "tradecore/funding/funding_engine.hpp"
 #include "tradecore/ingest/ingress_pipeline.hpp"
@@ -79,6 +80,29 @@ int main(int argc, char* argv[]) {
   std::cout << "  Markets: " << cfg.markets.size() << "\n";
   std::cout << "  WAL path: " << cfg.persistence.wal_path << "\n";
 
+  // Initialize authenticator for ed25519 signature verification
+  auth::Authenticator authenticator;
+
+  // TODO: Load account public keys from config or key store
+  // For now, generate a test keypair for development
+  auth::PublicKey test_pubkey;
+  auth::SecretKey test_seckey;
+  auth::Authenticator::generate_keypair(test_pubkey, test_seckey);
+  authenticator.register_account(1, test_pubkey);  // Register test account
+
+  std::cout << "  Auth: " << authenticator.account_count() << " registered accounts\n";
+
+  // Create frame authenticator for signature verification
+  auth::FrameAuthenticator frame_auth(authenticator);
+
+  // Create auth verifier callback for ingress pipeline
+  auto auth_verifier = [&frame_auth](const ingest::FrameHeader& header,
+                                      std::span<const std::byte> payload) -> bool {
+    // Verify the frame signature
+    // Note: In production, the header bytes would come from the wire format
+    return frame_auth.verify_frame(&header, sizeof(header), payload, header.account);
+  };
+
   ingest::IngressPipeline ingress;
   ingest::IngressPipeline::Config ingress_cfg;
   ingress_cfg.max_new_orders_per_second = cfg.ingress.max_new_orders_per_second;
@@ -86,7 +110,7 @@ int main(int argc, char* argv[]) {
   ingress_cfg.new_order_queue_depth = cfg.ingress.new_order_queue_depth;
   ingress_cfg.cancel_queue_depth = cfg.ingress.cancel_queue_depth;
   ingress_cfg.replace_queue_depth = cfg.ingress.replace_queue_depth;
-  ingress.configure(ingress_cfg);
+  ingress.configure(ingress_cfg, auth_verifier);
 
   ingest::QuicTransport transport;
   transport.start(cfg.transport.endpoint, [&](const ingest::Frame& frame) {

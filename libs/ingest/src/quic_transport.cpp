@@ -3,15 +3,33 @@
 namespace tradecore {
 namespace ingest {
 
-void QuicTransport::start(std::string endpoint_uri, FrameCallback callback) {
+QuicTransport::QuicTransport() : transport_(std::make_unique<UdpTransport>()) {}
+
+QuicTransport::~QuicTransport() {
+  stop();
+}
+
+bool QuicTransport::start(std::string endpoint_uri, FrameCallback callback) {
   endpoint_ = std::move(endpoint_uri);
-  callback_ = std::move(callback);
-  // Real implementation would start QUIC listener and feed frames into callback.
+  return transport_->start(endpoint_, std::move(callback));
 }
 
 void QuicTransport::stop() {
-  callback_ = nullptr;
+  if (transport_) {
+    transport_->stop();
+  }
   endpoint_.clear();
+}
+
+bool QuicTransport::is_running() const {
+  return transport_ && transport_->is_running();
+}
+
+TransportStats QuicTransport::stats() const {
+  if (transport_) {
+    return transport_->stats();
+  }
+  return {};
 }
 
 }  // namespace ingest

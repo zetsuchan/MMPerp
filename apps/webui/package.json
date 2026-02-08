@@ -1,0 +1,32 @@
+{
+  "name": "@mmperp/webui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc -b",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    "oxc:suite": "node ./scripts/oxc-suite.mjs",
+    "build": "npm run typecheck && npm run oxc:suite && vite build",
+    "preview": "vite preview",
+    "check": "npm run format && npm run lint && npm run build"
+  },
+  "dependencies": {
+    "@mori2003/jsimgui": "^0.13.0"
+  },
+  "devDependencies": {
+    "@oxc-project/types": "^0.112.0",
+    "oxc-minify": "^0.112.0",
+    "oxc-parser": "^0.112.0",
+    "oxc-resolver": "^11.17.0",
+    "oxc-transform": "^0.112.0",
+    "oxfmt": "^0.28.0",
+    "oxlint": "^1.43.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  }
+}

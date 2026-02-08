@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <regex>
 #include <stdexcept>
@@ -14,6 +15,8 @@ namespace tradecore {
 namespace ingest {
 
 namespace {
+
+constexpr auto kPeerLivenessWindow = std::chrono::seconds(5);
 
 struct EndpointInfo {
   std::string host;
@@ -30,6 +33,11 @@ EndpointInfo parse_endpoint(const std::string& uri) {
     return {match[2].str(), static_cast<std::uint16_t>(std::stoi(match[3].str())), true};
   }
   return {"", 0, false};
+}
+
+std::uint64_t peer_key(const sockaddr_in& sender_addr) {
+  return (static_cast<std::uint64_t>(sender_addr.sin_addr.s_addr) << 16) |
+         static_cast<std::uint64_t>(ntohs(sender_addr.sin_port));
 }
 
 }  // namespace
@@ -107,6 +115,11 @@ void UdpTransport::stop() {
     socket_fd_ = -1;
   }
 
+  {
+    std::scoped_lock lock(peers_mutex_);
+    peer_last_seen_.clear();
+  }
+
   callback_ = nullptr;
 }
 
@@ -115,11 +128,25 @@ bool UdpTransport::is_running() const {
 }
 
 TransportStats UdpTransport::stats() const {
+  std::uint64_t connections_active = 0;
+  const auto now = std::chrono::steady_clock::now();
+  {
+    std::scoped_lock lock(peers_mutex_);
+    for (auto it = peer_last_seen_.begin(); it != peer_last_seen_.end();) {
+      if ((now - it->second) > kPeerLivenessWindow) {
+        it = peer_last_seen_.erase(it);
+      } else {
+        ++connections_active;
+        ++it;
+      }
+    }
+  }
+
   return {
       .bytes_received = bytes_received_.load(),
       .frames_received = frames_received_.load(),
       .frames_malformed = frames_malformed_.load(),
-      .connections_active = running_.load() ? 1UL : 0UL,
+      .connections_active = connections_active,
   };
 }
 
@@ -151,6 +178,18 @@ void UdpTransport::receive_loop() {
     }
 
     bytes_received_.fetch_add(static_cast<std::uint64_t>(received));
+    const auto now = std::chrono::steady_clock::now();
+    {
+      std::scoped_lock lock(peers_mutex_);
+      peer_last_seen_[peer_key(sender_addr)] = now;
+      for (auto it = peer_last_seen_.begin(); it != peer_last_seen_.end();) {
+        if ((now - it->second) > kPeerLivenessWindow) {
+          it = peer_last_seen_.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    }
 
     Frame frame;
     if (parse_frame(buffer.data(), static_cast<std::size_t>(received), frame, payload_storage)) {

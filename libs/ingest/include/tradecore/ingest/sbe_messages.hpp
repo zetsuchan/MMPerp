@@ -34,6 +34,12 @@ struct Replace {
 
 namespace detail {
 
+inline void require_size(std::span<const std::byte> data, std::size_t required, const char* message) {
+  if (data.size() < required) {
+    throw std::runtime_error(message);
+  }
+}
+
 template <typename T>
 inline void append_primitive(std::vector<std::byte>& buffer, T value) {
   auto raw = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
@@ -53,9 +59,15 @@ inline T read_primitive(std::span<const std::byte> data, std::size_t& offset) {
 
 }  // namespace detail
 
+inline constexpr std::size_t kNewOrderEncodedSize =
+    sizeof(std::uint8_t) + sizeof(std::int64_t) + sizeof(std::int64_t) + sizeof(std::uint16_t);
+inline constexpr std::size_t kCancelEncodedSize = sizeof(std::uint64_t);
+inline constexpr std::size_t kReplaceEncodedSize =
+    sizeof(std::uint64_t) + sizeof(std::int64_t) + sizeof(std::int64_t) + sizeof(std::uint16_t);
+
 inline std::vector<std::byte> encode(const NewOrder& msg) {
   std::vector<std::byte> buffer;
-  buffer.reserve(1 + sizeof(std::int64_t) * 2 + sizeof(std::uint16_t));
+  buffer.reserve(kNewOrderEncodedSize);
   detail::append_primitive<std::uint8_t>(buffer, static_cast<std::uint8_t>(msg.side));
   detail::append_primitive<std::int64_t>(buffer, msg.quantity);
   detail::append_primitive<std::int64_t>(buffer, msg.price);
@@ -64,6 +76,7 @@ inline std::vector<std::byte> encode(const NewOrder& msg) {
 }
 
 inline NewOrder decode_new_order(std::span<const std::byte> data) {
+  detail::require_size(data, kNewOrderEncodedSize, "sbe new_order decode out of bounds");
   std::size_t offset = 0;
   NewOrder msg;
   msg.side = static_cast<common::Side>(detail::read_primitive<std::uint8_t>(data, offset));
@@ -75,12 +88,13 @@ inline NewOrder decode_new_order(std::span<const std::byte> data) {
 
 inline std::vector<std::byte> encode(const Cancel& msg) {
   std::vector<std::byte> buffer;
-  buffer.reserve(sizeof(std::uint64_t));
+  buffer.reserve(kCancelEncodedSize);
   detail::append_primitive<std::uint64_t>(buffer, msg.order_id);
   return buffer;
 }
 
 inline Cancel decode_cancel(std::span<const std::byte> data) {
+  detail::require_size(data, kCancelEncodedSize, "sbe cancel decode out of bounds");
   std::size_t offset = 0;
   Cancel msg;
   msg.order_id = detail::read_primitive<std::uint64_t>(data, offset);
@@ -89,7 +103,7 @@ inline Cancel decode_cancel(std::span<const std::byte> data) {
 
 inline std::vector<std::byte> encode(const Replace& msg) {
   std::vector<std::byte> buffer;
-  buffer.reserve(sizeof(std::uint64_t) + sizeof(std::int64_t) * 2 + sizeof(std::uint16_t));
+  buffer.reserve(kReplaceEncodedSize);
   detail::append_primitive<std::uint64_t>(buffer, msg.order_id);
   detail::append_primitive<std::int64_t>(buffer, msg.new_quantity);
   detail::append_primitive<std::int64_t>(buffer, msg.new_price);
@@ -98,6 +112,7 @@ inline std::vector<std::byte> encode(const Replace& msg) {
 }
 
 inline Replace decode_replace(std::span<const std::byte> data) {
+  detail::require_size(data, kReplaceEncodedSize, "sbe replace decode out of bounds");
   std::size_t offset = 0;
   Replace msg;
   msg.order_id = detail::read_primitive<std::uint64_t>(data, offset);

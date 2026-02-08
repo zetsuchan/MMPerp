@@ -1,11 +1,14 @@
 #pragma once
 
+#include <chrono>
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include "tradecore/ingest/frame.hpp"
 
@@ -73,6 +76,8 @@ class UdpTransport : public Transport {
   mutable std::atomic<std::uint64_t> bytes_received_{0};
   mutable std::atomic<std::uint64_t> frames_received_{0};
   mutable std::atomic<std::uint64_t> frames_malformed_{0};
+  mutable std::mutex peers_mutex_{};
+  mutable std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point> peer_last_seen_{};
 };
 
 }  // namespace ingest

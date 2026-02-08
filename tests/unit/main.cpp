@@ -30,6 +30,7 @@ int main() {
   test_cancel_message();
   test_heartbeat_dropped();
   test_rate_limiting();
+  test_sbe_decode_bounds();
 
   // Funding tests
   test_funding_engine();
@@ -42,6 +43,8 @@ int main() {
 
   // Persistence/replay tests
   test_persistence_replay();
+  test_persistence_replay_determinism();
+  test_snapshot_compaction_and_integrity();
 
   return 0;
 }

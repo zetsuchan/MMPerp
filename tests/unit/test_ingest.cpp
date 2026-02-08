@@ -1,6 +1,7 @@
 #include "test_ingest.hpp"
 
 #include <cassert>
+#include <stdexcept>
 #include <span>
 #include "tradecore/ingest/ingress_pipeline.hpp"
 #include "tradecore/ingest/sbe_messages.hpp"
@@ -123,6 +124,41 @@ void test_rate_limiting() {
   };
   assert(!pipeline.submit(frame3));
   assert(pipeline.stats().rejected_rate_limit == 1);
+}
+
+void test_sbe_decode_bounds() {
+  {
+    std::vector<std::byte> truncated(ingest::sbe::kNewOrderEncodedSize - 1);
+    bool threw = false;
+    try {
+      (void)ingest::sbe::decode_new_order(truncated);
+    } catch (const std::runtime_error&) {
+      threw = true;
+    }
+    assert(threw);
+  }
+
+  {
+    std::vector<std::byte> truncated(ingest::sbe::kCancelEncodedSize - 1);
+    bool threw = false;
+    try {
+      (void)ingest::sbe::decode_cancel(truncated);
+    } catch (const std::runtime_error&) {
+      threw = true;
+    }
+    assert(threw);
+  }
+
+  {
+    std::vector<std::byte> truncated(ingest::sbe::kReplaceEncodedSize - 1);
+    bool threw = false;
+    try {
+      (void)ingest::sbe::decode_replace(truncated);
+    } catch (const std::runtime_error&) {
+      threw = true;
+    }
+    assert(threw);
+  }
 }
 
 }  // namespace tradecore::tests
